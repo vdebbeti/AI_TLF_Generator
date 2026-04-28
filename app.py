@@ -5,6 +5,7 @@ import copy
 import time
 import uuid
 import traceback
+from dataclasses import is_dataclass, asdict
 
 import streamlit as st
 
@@ -124,7 +125,7 @@ for k, v in {
 
 def _log_event(event: str, status: str = "INFO", details: dict | None = None, run_id: str | None = None) -> None:
     st.session_state.event_seq += 1
-    safe_details = copy.deepcopy(details) if details is not None else {}
+    safe_details = _make_json_safe(copy.deepcopy(details) if details is not None else {})
     st.session_state.session_log.append(
         {
             "ts_utc": datetime.now(timezone.utc).isoformat(),
@@ -136,6 +137,20 @@ def _log_event(event: str, status: str = "INFO", details: dict | None = None, ru
             "details": safe_details,
         }
     )
+
+
+def _make_json_safe(obj):
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    if is_dataclass(obj):
+        return _make_json_safe(asdict(obj))
+    if isinstance(obj, dict):
+        return {str(k): _make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [_make_json_safe(v) for v in obj]
+    if hasattr(obj, "__dict__"):
+        return _make_json_safe(vars(obj))
+    return str(obj)
 
 
 def _session_log_text() -> str:
@@ -180,7 +195,7 @@ with st.sidebar:
     st.caption("Download full in-app session events (parse, guardrails, recipe, eval).")
     st.download_button(
         "Download Log (JSON)",
-        data=json.dumps(st.session_state.session_log, indent=2),
+        data=json.dumps(_make_json_safe(st.session_state.session_log), indent=2),
         file_name="session_log.json",
         mime="application/json",
         use_container_width=True,
