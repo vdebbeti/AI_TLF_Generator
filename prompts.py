@@ -88,9 +88,27 @@ RECIPE_SYSTEM_AE = """
 You are a clinical R programmer building AE safety tables.
 Create ONLY recipe JSON.
 
-Schema is identical to the standard recipe schema.
+Return this exact top-level shape:
+{
+  "approach":"tplyr",
+  "dataset_var":"adae",
+  "pre_filters":["SAFFL == 'Y'", "TRTEMFL == 'Y'"],
+  "derived_vars":[{"dataset_var":"adae","name":"ANY_EVENT","expr":"'Yes'"}],
+  "tables":[{
+    "table_var":"t1",
+    "dataset_var":"adae",
+    "treatment_var":"TRTP",
+    "add_total":true,
+    "layers":[
+      {"type":"group_count","var":"ANY_EVENT","nested_var":null,"by_var":null,"distinct_by":"USUBJID"},
+      {"type":"group_count","var":"AEBODSYS","nested_var":"AEDECOD","by_var":null,"distinct_by":"USUBJID"}
+    ]
+  }],
+  "combine_method":"bind_rows"
+}
 
 Hard rules:
+- tables must be a non-empty array.
 - Use exactly one nested SOC/PT layer for event breakdown:
   {"type":"group_count","var":"AEBODSYS","nested_var":"AEDECOD","by_var":null,"distinct_by":"USUBJID"}
 - Keep population flags in pre_filters.
@@ -104,9 +122,27 @@ RECIPE_SYSTEM_DEMOG = """
 You are a clinical R programmer building demographics/baseline tables.
 Create ONLY recipe JSON.
 
-Schema is identical to the standard recipe schema.
+Return this exact top-level shape:
+{
+  "approach":"tplyr",
+  "dataset_var":"adsl",
+  "pre_filters":["ITTFL == 'Y'"],
+  "derived_vars":[],
+  "tables":[{
+    "table_var":"t1",
+    "dataset_var":"adsl",
+    "treatment_var":"TRT01P",
+    "add_total":true,
+    "layers":[
+      {"type":"group_desc","var":"AGE","nested_var":null,"by_var":null,"distinct_by":null,"stats":["n","mean","sd","median","min","max"]},
+      {"type":"group_count","var":"SEX","nested_var":null,"by_var":null,"distinct_by":null}
+    ]
+  }],
+  "combine_method":"bind_rows"
+}
 
 Hard rules:
+- tables must be a non-empty array.
 - Continuous variables -> group_desc layers with stats.
 - Categorical variables -> one group_count layer per variable.
 - Do not create one layer per category label (e.g., Male/Female).
@@ -119,9 +155,26 @@ RECIPE_SYSTEM_RESPONSE = """
 You are a clinical R programmer building oncology response tables.
 Create ONLY recipe JSON.
 
-Schema is identical to the standard recipe schema.
+Return this exact top-level shape:
+{
+  "approach":"tplyr",
+  "dataset_var":"adrs",
+  "pre_filters":["FASFL == 'Y'", "ANL01FL == 'Y'", "PARAMCD == 'BOR'"],
+  "derived_vars":[],
+  "tables":[{
+    "table_var":"t1",
+    "dataset_var":"adrs",
+    "treatment_var":"TRTP",
+    "add_total":false,
+    "layers":[
+      {"type":"group_count","var":"AVALC","nested_var":null,"by_var":null,"distinct_by":"USUBJID"}
+    ]
+  }],
+  "combine_method":"bind_rows"
+}
 
 Hard rules:
+- tables must be a non-empty array.
 - For response categories, create ONE group_count layer on AVALC (not one per CR/PR/SD/PD/NE row).
 - PARAMCD/ANL flags belong in pre_filters.
 - Derived ORR/DCR rows should be derived_vars then layers on derived flags.
@@ -133,7 +186,9 @@ Hard rules:
 JSON_REPAIR_SYSTEM = """
 You repair JSON to satisfy validator errors.
 Return only corrected JSON. No prose.
-Keep content minimally changed.
+If the error says tables are missing or empty, rebuild a complete non-empty tables array from the context.
+For recipe_json, the final object must include: approach, dataset_var, pre_filters, derived_vars, tables, combine_method.
+Keep content minimally changed unless missing required recipe structure.
 """
 
 

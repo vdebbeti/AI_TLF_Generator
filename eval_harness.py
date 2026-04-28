@@ -80,6 +80,7 @@ def run_suite(
             "post_repair_recipe_issue_count": 0,
             "used_deterministic_fallback": False,
             "fallback_issue_count": 0,
+            "llm_used_empty_tables_retry": False,
         }
         if benchmark_routing and expected_type:
             metrics["route_correct"] = cls.table_type == expected_type
@@ -94,6 +95,9 @@ def run_suite(
                     temperature=recipe_temperature,
                     routing_mode=routing_mode,
                     classifier_votes=classifier_votes,
+                )
+                metrics["llm_used_empty_tables_retry"] = bool(
+                    (recipe.get("_generation") or {}).get("used_empty_tables_retry")
                 )
                 recipe_issues = validate_recipe(recipe, table_json, adam_specs)
                 metrics["pre_repair_recipe_issue_count"] = len(recipe_issues)
@@ -187,6 +191,7 @@ def run_suite(
                     "recipe_repair_retries": row.get("recipe_repair_retries"),
                     "used_deterministic_fallback": metrics.get("used_deterministic_fallback"),
                     "fallback_issue_count": metrics.get("fallback_issue_count"),
+                    "llm_used_empty_tables_retry": metrics.get("llm_used_empty_tables_retry"),
                     "llm_error": row.get("llm_error"),
                 },
             )

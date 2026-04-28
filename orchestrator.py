@@ -65,7 +65,15 @@ def generate_recipe(
     elif route == "response":
         system_prompt = RECIPE_SYSTEM_RESPONSE
 
-    prompt = f"Table JSON:\n{json.dumps(table_json, indent=2)}\n\nAdaM Specs:\n{json.dumps(adam_specs or {}, indent=2)}"
+    starter_recipe = build_deterministic_recipe(table_json, adam_specs, route=route)
+    prompt = (
+        f"Required route: {route}\n\n"
+        "Use the starter recipe as the structural contract. You may adjust filters, stats, and layers only when the input proves it.\n"
+        "Do not return an empty tables array.\n\n"
+        f"Starter recipe JSON:\n{json.dumps(starter_recipe, indent=2)}\n\n"
+        f"Table JSON:\n{json.dumps(table_json, indent=2)}\n\n"
+        f"AdaM Specs:\n{json.dumps(adam_specs or {}, indent=2)}"
+    )
     raw = call_llm(
         system=system_prompt,
         user=prompt,
@@ -77,6 +85,32 @@ def generate_recipe(
         json_mode=True,
     )
     recipe = json.loads(_strip_fences(raw))
+    used_empty_tables_retry = False
+    if not isinstance(recipe.get("tables"), list) or not recipe.get("tables"):
+        used_empty_tables_retry = True
+        retry_prompt = (
+            "Your previous recipe was invalid because `tables` was missing or empty.\n"
+            "Return a full corrected recipe JSON now. Start from this valid starter recipe and adapt only if necessary.\n\n"
+            f"Starter recipe JSON:\n{json.dumps(starter_recipe, indent=2)}\n\n"
+            f"Previous response JSON:\n{json.dumps(recipe, indent=2)}\n\n"
+            f"Table JSON:\n{json.dumps(table_json, indent=2)}\n\n"
+            f"AdaM Specs:\n{json.dumps(adam_specs or {}, indent=2)}"
+        )
+        raw = call_llm(
+            system=system_prompt,
+            user=retry_prompt,
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            max_tokens=4000,
+            temperature=0.0,
+            json_mode=True,
+        )
+        recipe = json.loads(_strip_fences(raw))
+    recipe["_generation"] = {
+        "used_starter_recipe": True,
+        "used_empty_tables_retry": used_empty_tables_retry,
+    }
     recipe["_routing"] = {
         "table_type": cls.table_type,
         "confidence": cls.confidence,

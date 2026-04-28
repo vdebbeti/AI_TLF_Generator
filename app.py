@@ -410,6 +410,7 @@ if st.button("Generate Recipe and R + SAS Code", type="primary", use_container_w
                                 "issue_count": 0,
                                 "repair_retries": retries,
                                 "used_deterministic_fallback": True,
+                                "llm_generation": (fixed_recipe.get("_generation") or {}),
                                 "original_issues": recipe_issues,
                             },
                         )
@@ -434,7 +435,12 @@ if st.button("Generate Recipe and R + SAS Code", type="primary", use_container_w
                     _log_event(
                         "recipe_generation_completed",
                         "SUCCESS",
-                        {"issue_count": 0, "repair_retries": retries},
+                        {
+                            "issue_count": 0,
+                            "repair_retries": retries,
+                            "used_deterministic_fallback": False,
+                            "llm_generation": (fixed_recipe.get("_generation") or {}),
+                        },
                     )
             except Exception as e:
                 st.error(f"Recipe generation failed: {e}")
