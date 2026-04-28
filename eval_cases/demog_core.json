@@ -1,0 +1,125 @@
+{
+  "id": "demog_core",
+  "description": "Demographics shell should support continuous + categorical layers with valid by_var handling.",
+  "table_json": {
+    "table_metadata": {
+      "title": "Summary of Demographic and Baseline Characteristics",
+      "population": "Intent-to-Treat Population (ITTFL=Y)",
+      "dataset_source": "ADSL",
+      "population_flags": [
+        "ITTFL"
+      ]
+    },
+    "columns": [
+      {
+        "label": "Characteristic",
+        "type": "stub",
+        "value": null
+      },
+      {
+        "label": "Placebo (N=100)",
+        "type": "treatment_group",
+        "value": "PBO"
+      },
+      {
+        "label": "Drug A (N=98)",
+        "type": "treatment_group",
+        "value": "DRUGA"
+      },
+      {
+        "label": "Total (N=198)",
+        "type": "total",
+        "value": null
+      }
+    ],
+    "rows": [
+      {
+        "label": "Age (Years)",
+        "analysis_var": "AGE",
+        "stats": [
+          "n",
+          "Mean (SD)",
+          "Median",
+          "Min, Max"
+        ],
+        "parent_label": null,
+        "indent_level": 0,
+        "row_type": "continuous",
+        "distinct_by": null,
+        "dynamic": false
+      },
+      {
+        "label": "Sex",
+        "analysis_var": "SEX",
+        "stats": [
+          "n (%)"
+        ],
+        "parent_label": null,
+        "indent_level": 0,
+        "row_type": "category",
+        "distinct_by": null,
+        "dynamic": true
+      },
+      {
+        "label": "Male",
+        "analysis_var": "SEX",
+        "stats": [
+          "n (%)"
+        ],
+        "parent_label": "Sex",
+        "indent_level": 1,
+        "row_type": "category",
+        "distinct_by": null,
+        "dynamic": true
+      }
+    ]
+  },
+  "adam_specs": {
+    "dataset": "ADSL",
+    "description": "Subject-Level Analysis Dataset",
+    "population_flags": [
+      {
+        "variable": "ITTFL",
+        "condition": "ITTFL='Y'",
+        "label": "Intent-to-Treat Population"
+      }
+    ],
+    "key_variables": [
+      {
+        "variable": "USUBJID",
+        "label": "Unique Subject Identifier",
+        "type": "Char",
+        "codelist": [],
+        "notes": ""
+      },
+      {
+        "variable": "TRT01P",
+        "label": "Planned Treatment",
+        "type": "Char",
+        "codelist": [],
+        "notes": ""
+      },
+      {
+        "variable": "AGE",
+        "label": "Age",
+        "type": "Num",
+        "codelist": [],
+        "notes": ""
+      },
+      {
+        "variable": "SEX",
+        "label": "Sex",
+        "type": "Char",
+        "codelist": [
+          "M",
+          "F"
+        ],
+        "notes": ""
+      }
+    ],
+    "treatment_variable": "TRT01P",
+    "analysis_conditions": [],
+    "codelists": []
+  },
+  "expected_table_type": "demog"
+}

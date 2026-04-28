@@ -1,0 +1,125 @@
+{
+  "id": "ae_soc_pt_core",
+  "description": "AE table should resolve to nested SOC/PT logic, not literal PT-only copy.",
+  "table_json": {
+    "table_metadata": {
+      "title": "Table 14.3.1 Adverse Events by System Organ Class and Preferred Term",
+      "population": "Safety Analysis Set (SAFFL=Y); Treatment-Emergent (TRTEMFL=Y)",
+      "dataset_source": "ADAE",
+      "population_flags": [
+        "SAFFL",
+        "TRTEMFL"
+      ]
+    },
+    "columns": [
+      {
+        "label": "System Organ Class / Preferred Term",
+        "type": "stub",
+        "value": null
+      },
+      {
+        "label": "Placebo (N=100)",
+        "type": "treatment_group",
+        "value": "PBO"
+      },
+      {
+        "label": "Drug A (N=98)",
+        "type": "treatment_group",
+        "value": "DRUGA"
+      },
+      {
+        "label": "Total (N=198)",
+        "type": "total",
+        "value": null
+      }
+    ],
+    "rows": [
+      {
+        "label": "Subjects with any TEAE",
+        "analysis_var": "USUBJID",
+        "stats": [
+          "n (%)"
+        ],
+        "parent_label": null,
+        "indent_level": 0,
+        "row_type": "subject_count",
+        "distinct_by": "USUBJID",
+        "dynamic": false
+      },
+      {
+        "label": "Gastrointestinal disorders",
+        "analysis_var": "AEBODSYS",
+        "stats": [
+          "n (%)"
+        ],
+        "parent_label": null,
+        "indent_level": 0,
+        "row_type": "category",
+        "distinct_by": "USUBJID",
+        "dynamic": true
+      },
+      {
+        "label": "Nausea",
+        "analysis_var": "AEDECOD",
+        "stats": [
+          "n (%)"
+        ],
+        "parent_label": "Gastrointestinal disorders",
+        "indent_level": 1,
+        "row_type": "category",
+        "distinct_by": "USUBJID",
+        "dynamic": true
+      }
+    ]
+  },
+  "adam_specs": {
+    "dataset": "ADAE",
+    "description": "Adverse Events Analysis Dataset",
+    "population_flags": [
+      {
+        "variable": "SAFFL",
+        "condition": "SAFFL='Y'",
+        "label": "Safety Analysis Set"
+      },
+      {
+        "variable": "TRTEMFL",
+        "condition": "TRTEMFL='Y'",
+        "label": "Treatment-Emergent"
+      }
+    ],
+    "key_variables": [
+      {
+        "variable": "USUBJID",
+        "label": "Unique Subject Identifier",
+        "type": "Char",
+        "codelist": [],
+        "notes": ""
+      },
+      {
+        "variable": "TRTP",
+        "label": "Planned Treatment",
+        "type": "Char",
+        "codelist": [],
+        "notes": ""
+      },
+      {
+        "variable": "AEBODSYS",
+        "label": "System Organ Class",
+        "type": "Char",
+        "codelist": [],
+        "notes": ""
+      },
+      {
+        "variable": "AEDECOD",
+        "label": "Preferred Term",
+        "type": "Char",
+        "codelist": [],
+        "notes": ""
+      }
+    ],
+    "treatment_variable": "TRTP",
+    "analysis_conditions": [],
+    "codelists": []
+  },
+  "expected_table_type": "ae"
+}

@@ -1,0 +1,90 @@
+{
+  "id": "survival_core",
+  "description": "Time-to-event table for ADTTE to validate routing and variable discipline.",
+  "table_json": {
+    "table_metadata": {
+      "title": "Kaplan-Meier Summary for Progression-Free Survival",
+      "population": "Full Analysis Set (FASFL=Y)",
+      "dataset_source": "ADTTE",
+      "population_flags": [
+        "FASFL"
+      ]
+    },
+    "columns": [
+      {
+        "label": "Statistic",
+        "type": "stub",
+        "value": null
+      },
+      {
+        "label": "Placebo",
+        "type": "treatment_group",
+        "value": "PBO"
+      },
+      {
+        "label": "Drug A",
+        "type": "treatment_group",
+        "value": "DRUGA"
+      }
+    ],
+    "rows": [
+      {
+        "label": "Median Time (Months)",
+        "analysis_var": "AVAL",
+        "stats": [
+          "Median"
+        ],
+        "parent_label": null,
+        "indent_level": 0,
+        "row_type": "continuous",
+        "distinct_by": null,
+        "dynamic": false
+      }
+    ]
+  },
+  "adam_specs": {
+    "dataset": "ADTTE",
+    "description": "Time-to-event dataset",
+    "population_flags": [
+      {
+        "variable": "FASFL",
+        "condition": "FASFL='Y'",
+        "label": "Full Analysis Set"
+      }
+    ],
+    "key_variables": [
+      {
+        "variable": "USUBJID",
+        "label": "Subject Identifier",
+        "type": "Char",
+        "codelist": [],
+        "notes": ""
+      },
+      {
+        "variable": "TRTP",
+        "label": "Treatment",
+        "type": "Char",
+        "codelist": [],
+        "notes": ""
+      },
+      {
+        "variable": "AVAL",
+        "label": "Analysis Value (time)",
+        "type": "Num",
+        "codelist": [],
+        "notes": ""
+      },
+      {
+        "variable": "CNSR",
+        "label": "Censoring Flag",
+        "type": "Num",
+        "codelist": [],
+        "notes": ""
+      }
+    ],
+    "treatment_variable": "TRTP",
+    "analysis_conditions": [],
+    "codelists": []
+  },
+  "expected_table_type": "survival"
+}

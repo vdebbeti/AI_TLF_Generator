@@ -1,0 +1,137 @@
+{
+  "id": "response_core",
+  "description": "Response table should produce one AVALC category layer and allow derived ORR/DCR flags.",
+  "table_json": {
+    "table_metadata": {
+      "title": "Best Overall Response (BOR) by Treatment",
+      "population": "Full Analysis Set (FASFL=Y), ANL01FL=Y, PARAMCD=BOR",
+      "dataset_source": "ADRS",
+      "population_flags": [
+        "FASFL",
+        "ANL01FL"
+      ]
+    },
+    "columns": [
+      {
+        "label": "Response Category",
+        "type": "stub",
+        "value": null
+      },
+      {
+        "label": "Drug A (N=120)",
+        "type": "treatment_group",
+        "value": "DRUGA"
+      },
+      {
+        "label": "Placebo (N=118)",
+        "type": "treatment_group",
+        "value": "PBO"
+      }
+    ],
+    "rows": [
+      {
+        "label": "Best Overall Response",
+        "analysis_var": "AVALC",
+        "stats": [
+          "n (%)"
+        ],
+        "parent_label": null,
+        "indent_level": 0,
+        "row_type": "header",
+        "distinct_by": "USUBJID",
+        "dynamic": false
+      },
+      {
+        "label": "Complete Response (CR)",
+        "analysis_var": "AVALC",
+        "stats": [
+          "n (%)"
+        ],
+        "parent_label": "Best Overall Response",
+        "indent_level": 1,
+        "row_type": "category",
+        "distinct_by": "USUBJID",
+        "dynamic": true
+      },
+      {
+        "label": "Partial Response (PR)",
+        "analysis_var": "AVALC",
+        "stats": [
+          "n (%)"
+        ],
+        "parent_label": "Best Overall Response",
+        "indent_level": 1,
+        "row_type": "category",
+        "distinct_by": "USUBJID",
+        "dynamic": true
+      }
+    ]
+  },
+  "adam_specs": {
+    "dataset": "ADRS",
+    "description": "Oncology Response Analysis Dataset",
+    "population_flags": [
+      {
+        "variable": "FASFL",
+        "condition": "FASFL='Y'",
+        "label": "Full Analysis Set"
+      },
+      {
+        "variable": "ANL01FL",
+        "condition": "ANL01FL='Y'",
+        "label": "Primary Analysis"
+      }
+    ],
+    "key_variables": [
+      {
+        "variable": "USUBJID",
+        "label": "Unique Subject Identifier",
+        "type": "Char",
+        "codelist": [],
+        "notes": ""
+      },
+      {
+        "variable": "TRTP",
+        "label": "Treatment",
+        "type": "Char",
+        "codelist": [],
+        "notes": ""
+      },
+      {
+        "variable": "PARAMCD",
+        "label": "Parameter Code",
+        "type": "Char",
+        "codelist": [
+          "BOR"
+        ],
+        "notes": ""
+      },
+      {
+        "variable": "AVALC",
+        "label": "Analysis Value (Category)",
+        "type": "Char",
+        "codelist": [
+          "CR",
+          "PR",
+          "SD",
+          "PD",
+          "NE"
+        ],
+        "notes": ""
+      }
+    ],
+    "treatment_variable": "TRTP",
+    "analysis_conditions": [
+      {
+        "output": "BOR table",
+        "paramcd_filter": "BOR",
+        "anl_flag": "ANL01FL='Y'",
+        "primary_var": "AVALC",
+        "derived_condition": "n(%) by AVALC",
+        "r_skill": "group_count"
+      }
+    ],
+    "codelists": []
+  },
+  "expected_table_type": "response"
+}

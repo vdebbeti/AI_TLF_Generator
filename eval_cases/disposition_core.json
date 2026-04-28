@@ -1,0 +1,107 @@
+{
+  "id": "disposition_core",
+  "description": "Disposition table on ADSL should use categorical counting and treatment variable from specs.",
+  "table_json": {
+    "table_metadata": {
+      "title": "Subject Disposition",
+      "population": "Safety Population (SAFFL=Y)",
+      "dataset_source": "ADSL",
+      "population_flags": [
+        "SAFFL"
+      ]
+    },
+    "columns": [
+      {
+        "label": "Disposition Category",
+        "type": "stub",
+        "value": null
+      },
+      {
+        "label": "Placebo (N=100)",
+        "type": "treatment_group",
+        "value": "PBO"
+      },
+      {
+        "label": "Drug A (N=98)",
+        "type": "treatment_group",
+        "value": "DRUGA"
+      },
+      {
+        "label": "Total (N=198)",
+        "type": "total",
+        "value": null
+      }
+    ],
+    "rows": [
+      {
+        "label": "Completed Study",
+        "analysis_var": "EOSSTT",
+        "stats": [
+          "n (%)"
+        ],
+        "parent_label": null,
+        "indent_level": 0,
+        "row_type": "category",
+        "distinct_by": null,
+        "dynamic": true
+      },
+      {
+        "label": "Discontinued due to AE",
+        "analysis_var": "DCSREAS",
+        "stats": [
+          "n (%)"
+        ],
+        "parent_label": null,
+        "indent_level": 0,
+        "row_type": "category",
+        "distinct_by": null,
+        "dynamic": true
+      }
+    ]
+  },
+  "adam_specs": {
+    "dataset": "ADSL",
+    "description": "Subject-level dataset",
+    "population_flags": [
+      {
+        "variable": "SAFFL",
+        "condition": "SAFFL='Y'",
+        "label": "Safety"
+      }
+    ],
+    "key_variables": [
+      {
+        "variable": "USUBJID",
+        "label": "Subject Identifier",
+        "type": "Char",
+        "codelist": [],
+        "notes": ""
+      },
+      {
+        "variable": "TRT01P",
+        "label": "Planned Treatment",
+        "type": "Char",
+        "codelist": [],
+        "notes": ""
+      },
+      {
+        "variable": "EOSSTT",
+        "label": "End of Study Status",
+        "type": "Char",
+        "codelist": [],
+        "notes": ""
+      },
+      {
+        "variable": "DCSREAS",
+        "label": "Discontinuation Reason",
+        "type": "Char",
+        "codelist": [],
+        "notes": ""
+      }
+    ],
+    "treatment_variable": "TRT01P",
+    "analysis_conditions": [],
+    "codelists": []
+  },
+  "expected_table_type": "demog"
+}
