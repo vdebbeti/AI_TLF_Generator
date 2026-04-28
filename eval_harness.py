@@ -1,4 +1,5 @@
 import json
+import traceback
 from pathlib import Path
 
 from guardrails import (
@@ -32,10 +33,19 @@ def run_suite(
     routing_mode: str = "heuristic",
     classifier_votes: int = 3,
     benchmark_routing: bool = True,
+    event_logger=None,
+    run_id: str | None = None,
 ) -> dict:
     cases = load_cases(cases_dir)
     results = []
     for case in cases:
+        case_id = case.get("id", "unknown")
+        if event_logger:
+            event_logger(
+                "eval_case_started",
+                "INFO",
+                {"run_id": run_id, "case_id": case_id},
+            )
         table_json = case.get("table_json", {})
         adam_specs = case.get("adam_specs")
         table_issues = validate_table_json(table_json)
@@ -114,12 +124,23 @@ def run_suite(
             except Exception as e:
                 llm_error = str(e)
                 metrics["ae_soc_pt_nested_present"] = False if cls.table_type == "ae" else None
+                if event_logger:
+                    event_logger(
+                        "eval_case_failed",
+                        "ERROR",
+                        {
+                            "run_id": run_id,
+                            "case_id": case_id,
+                            "error": str(e),
+                            "traceback": traceback.format_exc(),
+                        },
+                    )
 
         final_recipe_issues = recipe_issues_after_repair if run_llm_recipe else recipe_issues
         passed = (not table_issues) and (not adam_issues) and (not final_recipe_issues) and (not llm_error)
-        results.append(
+        row = (
             {
-                "id": case.get("id", "unknown"),
+                "id": case_id,
                 "description": case.get("description", ""),
                 "path": case.get("_path"),
                 "passed": passed,
@@ -136,6 +157,24 @@ def run_suite(
                 "recipe": recipe,
             }
         )
+        results.append(row)
+        if event_logger:
+            event_logger(
+                "eval_case_completed",
+                "SUCCESS" if passed else "WARNING",
+                {
+                    "run_id": run_id,
+                    "case_id": case_id,
+                    "passed": passed,
+                    "route": metrics.get("table_type"),
+                    "expected_route": metrics.get("expected_table_type"),
+                    "route_correct": metrics.get("route_correct"),
+                    "pre_repair_recipe_issue_count": metrics.get("pre_repair_recipe_issue_count"),
+                    "post_repair_recipe_issue_count": metrics.get("post_repair_recipe_issue_count"),
+                    "recipe_repair_retries": row.get("recipe_repair_retries"),
+                    "llm_error": row.get("llm_error"),
+                },
+            )
 
     total = len(results)
     passed = sum(1 for r in results if r["passed"])
@@ -146,7 +185,7 @@ def run_suite(
     flag_misuse_total = sum(r["metrics"]["flag_misuse_issue_count"] for r in results)
     routed_scored = [r for r in results if r["metrics"]["route_correct"] is not None]
     route_hits = sum(1 for r in routed_scored if r["metrics"]["route_correct"] is True)
-    return {
+    summary = {
         "total_cases": total,
         "passed_cases": passed,
         "pass_rate": (passed / total * 100.0) if total else 0.0,
@@ -157,3 +196,16 @@ def run_suite(
         "flag_misuse_issues_total": flag_misuse_total,
         "results": results,
     }
+    if event_logger:
+        event_logger(
+            "eval_run_summary",
+            "INFO",
+            {
+                "run_id": run_id,
+                "total_cases": summary["total_cases"],
+                "passed_cases": summary["passed_cases"],
+                "pass_rate": summary["pass_rate"],
+                "routing_accuracy": summary["routing_accuracy"],
+            },
+        )
+    return summary

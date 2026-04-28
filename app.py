@@ -1,6 +1,10 @@
 import json
 from pathlib import Path
 from datetime import datetime, timezone
+import copy
+import time
+import uuid
+import traceback
 
 import streamlit as st
 
@@ -90,7 +94,7 @@ st.markdown(
     <div class="stepcard"><div class="stepnum">STEP 2</div><div class="steptitle">Parse Shell</div><div class="stepsub">Upload shell and parse JSON</div></div>
     <div class="stepcard"><div class="stepnum">STEP 3</div><div class="steptitle">Parse AdaM</div><div class="stepsub">Upload spec and parse JSON</div></div>
     <div class="stepcard"><div class="stepnum">STEP 4</div><div class="steptitle">Guardrails</div><div class="stepsub">Validate and auto-repair</div></div>
-    <div class="stepcard"><div class="stepnum">STEP 5</div><div class="steptitle">Recipe + R</div><div class="stepsub">Generate validated recipe and code</div></div>
+    <div class="stepcard"><div class="stepnum">STEP 5</div><div class="steptitle">Recipe + R/SAS</div><div class="stepsub">Generate validated recipe and both programs</div></div>
     <div class="stepcard"><div class="stepnum">STEP 6</div><div class="steptitle">Eval Harness</div><div class="stepsub">Run golden cases and score</div></div>
   </div>
 </div>
@@ -111,18 +115,25 @@ for k, v in {
     "repair_stats": {},
     "eval_result": None,
     "session_log": [],
+    "session_id": "",
+    "event_seq": 0,
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
 
-def _log_event(event: str, status: str = "INFO", details: dict | None = None) -> None:
+def _log_event(event: str, status: str = "INFO", details: dict | None = None, run_id: str | None = None) -> None:
+    st.session_state.event_seq += 1
+    safe_details = copy.deepcopy(details) if details is not None else {}
     st.session_state.session_log.append(
         {
             "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "session_id": st.session_state.session_id,
+            "event_seq": st.session_state.event_seq,
+            "run_id": run_id,
             "event": event,
             "status": status,
-            "details": details or {},
+            "details": safe_details,
         }
     )
 
@@ -136,8 +147,10 @@ def _session_log_text() -> str:
     return "\n".join(lines)
 
 
+if not st.session_state.session_id:
+    st.session_state.session_id = str(uuid.uuid4())
 if not st.session_state.session_log:
-    _log_event("session_started", "INFO", {"app": "TLF Compiler V2"})
+    _log_event("session_started", "INFO", {"app": "TLF Compiler V2", "session_id": st.session_state.session_id})
 
 
 def render_issues(issues: list[ValidationIssue] | list[dict], title: str) -> None:
@@ -315,7 +328,7 @@ if st.session_state.repair_stats:
     st.json(st.session_state.repair_stats)
 
 
-st.markdown("## Step 5 · Generate Recipe + Assemble R")
+st.markdown("## Step 5 · Generate Recipe + Assemble R + SAS")
 if st.session_state.table_json:
     cls = route_table(
         table_json=st.session_state.table_json,
@@ -329,7 +342,7 @@ if st.session_state.table_json:
     st.info(
         f"Routing target: `{cls.table_type}` (confidence {cls.confidence:.2f}, source={cls.source}) · {cls.rationale}"
     )
-if st.button("Generate Recipe and R Code", type="primary", use_container_width=True):
+if st.button("Generate Recipe and R + SAS Code", type="primary", use_container_width=True):
     _log_event("recipe_generation_requested", "INFO")
     if not api_key:
         st.error("API key is required.")
@@ -371,7 +384,11 @@ if st.button("Generate Recipe and R Code", type="primary", use_container_width=T
                     _log_event(
                         "recipe_generation_completed",
                         "WARNING",
-                        {"issue_count": len(recipe_issues), "repair_retries": retries},
+                        {
+                            "issue_count": len(recipe_issues),
+                            "repair_retries": retries,
+                            "issues": recipe_issues,
+                        },
                     )
                 else:
                     st.session_state.r_code = assemble_r_from_recipe(fixed_recipe)
@@ -391,27 +408,35 @@ if st.session_state.recipe_json:
     st.code(json.dumps(st.session_state.recipe_json, indent=2), language="json")
 render_issues(st.session_state.recipe_issues, "Recipe issues")
 
-if st.session_state.r_code:
-    st.markdown("### Assembled R Code")
-    st.code(st.session_state.r_code, language="r")
-    st.download_button(
-        "Download R Script",
-        data=st.session_state.r_code,
-        file_name="generated_table.R",
-        mime="text/plain",
-        use_container_width=True,
-    )
-
-if st.session_state.sas_code:
-    st.markdown("### Assembled SAS Program")
-    st.code(st.session_state.sas_code, language="sas")
-    st.download_button(
-        "Download SAS Program",
-        data=st.session_state.sas_code,
-        file_name="generated_table.sas",
-        mime="text/plain",
-        use_container_width=True,
-    )
+if st.session_state.r_code or st.session_state.sas_code:
+    st.markdown("### Assembled Programs")
+    left, right = st.columns(2)
+    with left:
+        st.markdown("#### R Script")
+        if st.session_state.r_code:
+            st.code(st.session_state.r_code, language="r")
+            st.download_button(
+                "Download R Script",
+                data=st.session_state.r_code,
+                file_name="generated_table.R",
+                mime="text/plain",
+                use_container_width=True,
+            )
+        else:
+            st.info("R script not available.")
+    with right:
+        st.markdown("#### SAS Program")
+        if st.session_state.sas_code:
+            st.code(st.session_state.sas_code, language="sas")
+            st.download_button(
+                "Download SAS Program",
+                data=st.session_state.sas_code,
+                file_name="generated_table.sas",
+                mime="text/plain",
+                use_container_width=True,
+            )
+        else:
+            st.info("SAS program not available.")
 
 
 st.markdown("## Step 6 · Evaluation Harness")
@@ -426,19 +451,23 @@ with c4:
     st.caption(f"Cases path: `{EVAL_CASES_DIR}`")
 
 if run_eval_btn:
+    eval_run_id = str(uuid.uuid4())
+    eval_start = time.time()
     _log_event(
         "eval_requested",
         "INFO",
         {
+            "run_id": eval_run_id,
             "run_llm_recipe": run_llm_recipe,
             "benchmark_routing": benchmark_routing,
             "routing_mode": routing_mode,
             "classifier_votes": classifier_votes,
         },
+        run_id=eval_run_id,
     )
     if run_llm_recipe and not api_key:
         st.error("API key is required for LLM-backed eval.")
-        _log_event("eval_failed", "ERROR", {"reason": "missing_api_key_for_llm_eval"})
+        _log_event("eval_failed", "ERROR", {"reason": "missing_api_key_for_llm_eval"}, run_id=eval_run_id)
     else:
         with st.spinner("Running evaluation harness..."):
             try:
@@ -453,21 +482,38 @@ if run_eval_btn:
                     routing_mode=routing_mode,
                     classifier_votes=classifier_votes,
                     benchmark_routing=benchmark_routing,
+                    event_logger=lambda ev, stt, det: _log_event(ev, stt, det, run_id=eval_run_id),
+                    run_id=eval_run_id,
                 )
                 st.session_state.eval_result = result
                 _log_event(
                     "eval_completed",
                     "SUCCESS",
                     {
+                        "run_id": eval_run_id,
                         "total_cases": result.get("total_cases"),
                         "passed_cases": result.get("passed_cases"),
                         "pass_rate": result.get("pass_rate"),
                         "routing_accuracy": result.get("routing_accuracy"),
                     },
+                    run_id=eval_run_id,
                 )
             except Exception as e:
                 st.error(f"Eval failed: {e}")
-                _log_event("eval_failed", "ERROR", {"error": str(e)})
+                _log_event(
+                    "eval_failed",
+                    "ERROR",
+                    {"error": str(e), "traceback": traceback.format_exc()},
+                    run_id=eval_run_id,
+                )
+            finally:
+                elapsed_ms = int((time.time() - eval_start) * 1000)
+                _log_event(
+                    "eval_finished",
+                    "INFO",
+                    {"run_id": eval_run_id, "elapsed_ms": elapsed_ms},
+                    run_id=eval_run_id,
+                )
 
 if st.session_state.eval_result:
     result = st.session_state.eval_result

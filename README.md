@@ -36,5 +36,5 @@ streamlit run app.py
   - captures end-to-end in-app events (parse, guardrails, recipe, eval)
   - downloadable as JSON or TXT from the sidebar
 - SAS output:
-  - assembles a SAS program from the same validated recipe used for R code
+  - assembles a SAS program from the same validated recipe used for both outputs
   - available in Step 5 with download button
