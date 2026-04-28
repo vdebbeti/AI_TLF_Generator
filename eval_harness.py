@@ -8,7 +8,7 @@ from guardrails import (
     validate_adam_specs,
     validate_and_repair,
 )
-from orchestrator import generate_recipe
+from orchestrator import build_deterministic_recipe, generate_recipe
 from table_classifier import route_table
 
 
@@ -78,6 +78,8 @@ def run_suite(
             "flag_misuse_issue_count": 0,
             "pre_repair_recipe_issue_count": 0,
             "post_repair_recipe_issue_count": 0,
+            "used_deterministic_fallback": False,
+            "fallback_issue_count": 0,
         }
         if benchmark_routing and expected_type:
             metrics["route_correct"] = cls.table_type == expected_type
@@ -108,6 +110,17 @@ def run_suite(
                 )
                 recipe = repaired_recipe
                 metrics["post_repair_recipe_issue_count"] = len(recipe_issues_after_repair)
+                if recipe_issues_after_repair:
+                    fallback_recipe = build_deterministic_recipe(table_json, adam_specs, route=cls.table_type)
+                    fallback_issues = validate_recipe(fallback_recipe, table_json, adam_specs)
+                    if not fallback_issues:
+                        recipe = fallback_recipe
+                        recipe_issues_after_repair = []
+                        metrics["used_deterministic_fallback"] = True
+                        metrics["post_repair_recipe_issue_count"] = 0
+                    else:
+                        metrics["used_deterministic_fallback"] = True
+                        metrics["fallback_issue_count"] = len(fallback_issues)
 
                 all_issues = recipe_issues + recipe_issues_after_repair
                 metrics["unknown_var_issue_count"] = sum(1 for i in all_issues if i.code == "semantics.unknown_var")
@@ -172,6 +185,8 @@ def run_suite(
                     "pre_repair_recipe_issue_count": metrics.get("pre_repair_recipe_issue_count"),
                     "post_repair_recipe_issue_count": metrics.get("post_repair_recipe_issue_count"),
                     "recipe_repair_retries": row.get("recipe_repair_retries"),
+                    "used_deterministic_fallback": metrics.get("used_deterministic_fallback"),
+                    "fallback_issue_count": metrics.get("fallback_issue_count"),
                     "llm_error": row.get("llm_error"),
                 },
             )

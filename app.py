@@ -20,7 +20,7 @@ from guardrails import (
     validate_table_json,
 )
 from llm_client import PROVIDER_MODELS
-from orchestrator import assemble_r_from_recipe, assemble_sas_from_recipe, generate_recipe
+from orchestrator import assemble_r_from_recipe, assemble_sas_from_recipe, build_deterministic_recipe, generate_recipe
 from parsers import parse_shell
 from table_classifier import route_table
 
@@ -395,16 +395,38 @@ if st.button("Generate Recipe and R + SAS Code", type="primary", use_container_w
                 st.session_state.recipe_issues = issue_dicts(recipe_issues)
                 st.session_state.repair_stats["recipe_retries"] = retries
                 if recipe_issues:
-                    st.error("Recipe still has validation issues; R/SAS assembly blocked.")
-                    _log_event(
-                        "recipe_generation_completed",
-                        "WARNING",
-                        {
-                            "issue_count": len(recipe_issues),
-                            "repair_retries": retries,
-                            "issues": recipe_issues,
-                        },
-                    )
+                    fallback_recipe = build_deterministic_recipe(st.session_state.table_json, st.session_state.adam_specs)
+                    fallback_issues = validate_recipe(fallback_recipe, st.session_state.table_json, st.session_state.adam_specs)
+                    if not fallback_issues:
+                        st.session_state.recipe_json = fallback_recipe
+                        st.session_state.recipe_issues = []
+                        st.session_state.r_code = assemble_r_from_recipe(fallback_recipe)
+                        st.session_state.sas_code = assemble_sas_from_recipe(fallback_recipe)
+                        st.success("LLM recipe was incomplete, so a validated deterministic R + SAS recipe was assembled.")
+                        _log_event(
+                            "recipe_generation_completed",
+                            "SUCCESS",
+                            {
+                                "issue_count": 0,
+                                "repair_retries": retries,
+                                "used_deterministic_fallback": True,
+                                "original_issues": recipe_issues,
+                            },
+                        )
+                    else:
+                        st.error("Recipe still has validation issues; R/SAS assembly blocked.")
+                        st.session_state.recipe_issues = issue_dicts(fallback_issues)
+                        _log_event(
+                            "recipe_generation_completed",
+                            "WARNING",
+                            {
+                                "issue_count": len(fallback_issues),
+                                "repair_retries": retries,
+                                "used_deterministic_fallback": True,
+                                "original_issues": recipe_issues,
+                                "fallback_issues": fallback_issues,
+                            },
+                        )
                 else:
                     st.session_state.r_code = assemble_r_from_recipe(fixed_recipe)
                     st.session_state.sas_code = assemble_sas_from_recipe(fixed_recipe)
@@ -423,7 +445,7 @@ if st.session_state.recipe_json:
     st.code(json.dumps(st.session_state.recipe_json, indent=2), language="json")
 render_issues(st.session_state.recipe_issues, "Recipe issues")
 
-if st.session_state.r_code or st.session_state.sas_code:
+if st.session_state.r_code or st.session_state.sas_code or st.session_state.recipe_json or st.session_state.recipe_issues:
     st.markdown("### Assembled Programs")
     left, right = st.columns(2)
     with left:

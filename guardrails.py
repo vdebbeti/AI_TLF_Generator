@@ -128,6 +128,10 @@ def validate_recipe(recipe: dict, table_json: dict, adam_specs: dict | None) -> 
         return issues
 
     allowed_vars = collect_allowed_vars(table_json, adam_specs)
+    for dv in recipe.get("derived_vars", []) or []:
+        name = (dv or {}).get("name")
+        if _is_var_name(name):
+            allowed_vars.add(name)
     ae_required = _is_ae_table(table_json)
     saw_nested_soc_pt = False
 
@@ -226,4 +230,3 @@ def validate_and_repair(
         issues = validator(repaired)
         retries += 1
     return repaired, issues, retries
-

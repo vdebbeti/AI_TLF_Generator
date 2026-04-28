@@ -88,6 +88,178 @@ def generate_recipe(
     return recipe
 
 
+def build_deterministic_recipe(table_json: dict, adam_specs: dict | None = None, route: str | None = None) -> dict:
+    """Construct a conservative recipe when the LLM returns an unusable skeleton."""
+    meta = table_json.get("table_metadata", {}) or {}
+    rows = table_json.get("rows", []) or []
+    cols = table_json.get("columns", []) or []
+    ds = (meta.get("dataset_source") or (adam_specs or {}).get("dataset") or "dataset").lower()
+    treatment_var = (adam_specs or {}).get("treatment_variable") or _guess_treatment_var(ds)
+    add_total = any((c.get("type") or "").lower() == "total" for c in cols if isinstance(c, dict))
+    route = route or route_table(table_json, adam_specs, mode="heuristic").table_type
+
+    pre_filters = _recipe_filters(table_json, adam_specs)
+    derived_vars: list[dict] = []
+    layers: list[dict] = []
+
+    if route == "ae":
+        if any((r.get("row_type") or "") == "subject_count" for r in rows if isinstance(r, dict)):
+            derived_vars.append({"dataset_var": ds, "name": "ANY_EVENT", "expr": "'Yes'"})
+            layers.append(
+                {
+                    "type": "group_count",
+                    "var": "ANY_EVENT",
+                    "nested_var": None,
+                    "by_var": None,
+                    "distinct_by": "USUBJID",
+                }
+            )
+        layers.append(
+            {
+                "type": "group_count",
+                "var": "AEBODSYS",
+                "nested_var": "AEDECOD",
+                "by_var": None,
+                "distinct_by": "USUBJID",
+            }
+        )
+    elif route == "response":
+        if "PARAMCD == 'BOR'" not in pre_filters and _has_var(adam_specs, "PARAMCD"):
+            pre_filters.append("PARAMCD == 'BOR'")
+        distinct = "USUBJID" if _has_var(adam_specs, "USUBJID") else None
+        layers.append(
+            {
+                "type": "group_count",
+                "var": "AVALC",
+                "nested_var": None,
+                "by_var": None,
+                "distinct_by": distinct,
+            }
+        )
+        labels = " ".join((r.get("label") or "").upper() for r in rows if isinstance(r, dict))
+        if "ORR" in labels:
+            derived_vars.append(
+                {"dataset_var": ds, "name": "ORR_FLAG", "expr": "ifelse(AVALC %in% c('CR','PR'), 'Yes', 'No')"}
+            )
+            layers.append({"type": "group_count", "var": "ORR_FLAG", "nested_var": None, "by_var": None, "distinct_by": distinct})
+        if "DCR" in labels:
+            derived_vars.append(
+                {"dataset_var": ds, "name": "DCR_FLAG", "expr": "ifelse(AVALC %in% c('CR','PR','SD'), 'Yes', 'No')"}
+            )
+            layers.append({"type": "group_count", "var": "DCR_FLAG", "nested_var": None, "by_var": None, "distinct_by": distinct})
+    elif route == "survival":
+        return {
+            "approach": "survival",
+            "dataset_var": ds,
+            "pre_filters": pre_filters,
+            "derived_vars": [],
+            "tables": [
+                {
+                    "table_var": "t1",
+                    "dataset_var": ds,
+                    "treatment_var": treatment_var,
+                    "add_total": False,
+                    "layers": [{"type": "group_desc", "var": "AVAL", "nested_var": None, "by_var": None, "distinct_by": None, "stats": ["median"]}],
+                }
+            ],
+            "combine_method": "bind_rows",
+            "_source": "deterministic_fallback",
+        }
+    else:
+        seen: set[str] = set()
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            var = r.get("analysis_var")
+            if not var or var in seen or var.endswith("FL"):
+                continue
+            row_type = r.get("row_type")
+            if row_type == "continuous":
+                layers.append(
+                    {
+                        "type": "group_desc",
+                        "var": var,
+                        "nested_var": None,
+                        "by_var": None,
+                        "distinct_by": None,
+                        "stats": _normalise_stats(r.get("stats") or []),
+                    }
+                )
+                seen.add(var)
+            elif row_type == "category":
+                layers.append({"type": "group_count", "var": var, "nested_var": None, "by_var": None, "distinct_by": r.get("distinct_by")})
+                seen.add(var)
+
+    return {
+        "approach": "tplyr",
+        "dataset_var": ds,
+        "pre_filters": pre_filters,
+        "derived_vars": derived_vars,
+        "tables": [
+            {
+                "table_var": "t1",
+                "dataset_var": ds,
+                "treatment_var": treatment_var,
+                "add_total": add_total,
+                "layers": layers,
+            }
+        ],
+        "combine_method": "bind_rows",
+        "_source": "deterministic_fallback",
+    }
+
+
+def _guess_treatment_var(dataset_var: str) -> str:
+    return "TRT01P" if dataset_var.lower() == "adsl" else "TRTP"
+
+
+def _has_var(adam_specs: dict | None, var: str) -> bool:
+    if not adam_specs:
+        return True
+    return any((kv or {}).get("variable") == var for kv in adam_specs.get("key_variables", []) or [])
+
+
+def _recipe_filters(table_json: dict, adam_specs: dict | None) -> list[str]:
+    filters: list[str] = []
+    flags = list((table_json.get("table_metadata", {}) or {}).get("population_flags", []) or [])
+    if adam_specs:
+        flags += [(pf or {}).get("variable") for pf in adam_specs.get("population_flags", []) or []]
+    for flag in flags:
+        if flag and f"{flag} == 'Y'" not in filters:
+            filters.append(f"{flag} == 'Y'")
+    if adam_specs:
+        for cond in adam_specs.get("analysis_conditions", []) or []:
+            anl = (cond or {}).get("anl_flag")
+            param = (cond or {}).get("paramcd_filter")
+            if anl:
+                expr = anl.replace("=", "==").replace("===", "==").replace('"', "'")
+                if expr not in filters:
+                    filters.append(expr)
+            if param:
+                expr = f"PARAMCD == '{param}'"
+                if expr not in filters:
+                    filters.append(expr)
+    return filters
+
+
+def _normalise_stats(stats: list[str]) -> list[str]:
+    out: list[str] = []
+    joined = " ".join(stats).lower()
+    if "n" in joined:
+        out.append("n")
+    if "mean" in joined:
+        out.append("mean")
+    if "sd" in joined:
+        out.append("sd")
+    if "median" in joined:
+        out.append("median")
+    if "min" in joined:
+        out.append("min")
+    if "max" in joined:
+        out.append("max")
+    return out or ["n", "mean", "sd", "median", "min", "max"]
+
+
 def assemble_r_from_recipe(recipe: dict) -> str:
     dataset_var = recipe.get("dataset_var", "dataset")
     lines = [PACKAGE_BLOCK, ""]
