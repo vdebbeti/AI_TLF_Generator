@@ -180,3 +180,170 @@ def _assemble_layer(layer: dict) -> str:
         count_block += f" %>%\n      set_distinct_by({distinct})"
     count_block += "\n  )"
     return count_block
+
+
+def _r_expr_to_sas(expr: str) -> str:
+    import re
+
+    s = expr or ""
+    s = s.replace("==", "=").replace("!=", "^=")
+    s = re.sub(r"\s&&?\s", " and ", s)
+    s = re.sub(r"\s\|\|?\s", " or ", s)
+    s = re.sub(r"\s%in%\s", " in ", s)
+    s = re.sub(r"\bTRUE\b", "1", s)
+    s = re.sub(r"\bFALSE\b", "0", s)
+    return s
+
+
+def assemble_sas_from_recipe(recipe: dict) -> str:
+    dataset_var = (recipe.get("dataset_var") or "dataset").lower()
+    approach = recipe.get("approach", "tplyr")
+    lines = [
+        "/* Auto-generated SAS program from recipe */",
+        "%let data_path = /path/to/your/dataset.sas7bdat;  /* override */",
+        "",
+        "%macro load_data;",
+        "  %let _ext = %lowcase(%scan(&data_path, -1, .));",
+        "  %if &_ext = sas7bdat %then %do;",
+        "    %let _dir  = %substr(&data_path, 1, %eval(%length(&data_path) - %length(%scan(&data_path, -1, /\\)) - 1));",
+        "    %let _file = %scan(%scan(&data_path, -1, /\\), 1, .);",
+        "    libname _in \"&_dir\";",
+        f"    data {dataset_var};",
+        "      set _in.&_file;",
+        "    run;",
+        "  %end;",
+        "  %else %if &_ext = csv %then %do;",
+        f"    proc import datafile=\"&data_path\" out={dataset_var} dbms=csv replace;",
+        "      getnames=yes;",
+        "    run;",
+        "  %end;",
+        "%mend load_data;",
+        "%load_data;",
+        "",
+    ]
+
+    filters = recipe.get("pre_filters", []) or []
+    derived = recipe.get("derived_vars", []) or []
+    if filters or derived:
+        lines.append(f"data {dataset_var};")
+        lines.append(f"  set {dataset_var};")
+        for dv in derived:
+            nm = dv.get("name", "")
+            ex = _r_expr_to_sas(dv.get("expr", ""))
+            if nm:
+                lines.append(f"  {nm} = {ex};")
+        if filters:
+            where_expr = " and ".join(f"({_r_expr_to_sas(f)})" for f in filters)
+            lines.append(f"  where {where_expr};")
+        lines.append("run;")
+        lines.append("")
+
+    if approach == "survival":
+        trt = "TRTP"
+        if recipe.get("tables"):
+            trt = recipe["tables"][0].get("treatment_var", "TRTP")
+        lines += [
+            f"proc lifetest data={dataset_var} notable outsurv=_km;",
+            "  time AVAL * CNSR(1);",
+            f"  strata {trt};",
+            "run;",
+            "",
+            "data final_df;",
+            "  set _km;",
+            "run;",
+            "",
+            "proc print data=final_df(obs=50); run;",
+        ]
+        return "\n".join(lines)
+
+    out_datasets: list[str] = []
+    for tbl in recipe.get("tables", []) or []:
+        tvar = (tbl.get("table_var") or "t1").lower()
+        work_ds = (tbl.get("dataset_var") or dataset_var).lower()
+        trt = tbl.get("treatment_var", "TRTP")
+        add_total = bool(tbl.get("add_total"))
+        layers = tbl.get("layers", []) or []
+
+        if add_total:
+            total_ds = f"{tvar}_in"
+            lines += [
+                f"data {total_ds};",
+                f"  set {work_ds} {work_ds}(in=_a);",
+                f"  if _a then {trt} = 'Total';",
+                "run;",
+                "",
+            ]
+            work_ds = total_ds
+
+        for li, layer in enumerate(layers, start=1):
+            ltype = layer.get("type", "group_count")
+            var = layer.get("var", "")
+            nested = layer.get("nested_var")
+            distinct = layer.get("distinct_by")
+            stats = layer.get("stats", []) or []
+            out_ds = f"{tvar}_l{li}"
+            if not var:
+                continue
+
+            if ltype == "group_desc":
+                stat_kw = []
+                if "n" in stats:
+                    stat_kw.append("n")
+                if "mean" in stats:
+                    stat_kw.append("mean")
+                if "sd" in stats:
+                    stat_kw.append("std")
+                if "median" in stats:
+                    stat_kw.append("median")
+                if "min" in stats:
+                    stat_kw.append("min")
+                if "max" in stats:
+                    stat_kw.append("max")
+                if not stat_kw:
+                    stat_kw = ["n", "mean", "std", "median", "min", "max"]
+                output_kw = " ".join(f"{k}={var}_{k}" for k in stat_kw)
+                lines += [
+                    f"proc means data={work_ds} noprint nway;",
+                    f"  class {trt};",
+                    f"  var {var};",
+                    f"  output out={out_ds}(drop=_type_ _freq_) {output_kw};",
+                    "run;",
+                    "",
+                ]
+                out_datasets.append(out_ds)
+                continue
+
+            tables_spec = f"{trt} * {var} * {nested}" if nested else f"{trt} * {var}"
+            if distinct:
+                dedup_ds = f"{out_ds}_u"
+                keep_vars = [trt, var] + ([nested] if nested else []) + [distinct]
+                lines += [
+                    f"proc sort data={work_ds}(keep={' '.join(keep_vars)}) out={dedup_ds} nodupkey;",
+                    f"  by {' '.join(keep_vars)};",
+                    "run;",
+                    "",
+                    f"proc freq data={dedup_ds} noprint;",
+                    f"  tables {tables_spec} / out={out_ds}(drop=percent) outpct;",
+                    "run;",
+                    "",
+                ]
+            else:
+                lines += [
+                    f"proc freq data={work_ds} noprint;",
+                    f"  tables {tables_spec} / out={out_ds}(drop=percent) outpct;",
+                    "run;",
+                    "",
+                ]
+            out_datasets.append(out_ds)
+
+    if not out_datasets:
+        lines += ["data final_df;", "  stop;", "run;"]
+    else:
+        lines += [
+            "data final_df;",
+            "  set " + " ".join(out_datasets) + ";",
+            "run;",
+            "",
+            "proc print data=final_df(obs=50); run;",
+        ]
+    return "\n".join(lines)

@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from datetime import datetime, timezone
 
 import streamlit as st
 
@@ -14,7 +15,7 @@ from guardrails import (
     validate_table_json,
 )
 from llm_client import PROVIDER_MODELS
-from orchestrator import assemble_r_from_recipe, generate_recipe
+from orchestrator import assemble_r_from_recipe, assemble_sas_from_recipe, generate_recipe
 from parsers import parse_shell
 from table_classifier import route_table
 
@@ -103,14 +104,40 @@ for k, v in {
     "adam_specs": None,
     "recipe_json": None,
     "r_code": "",
+    "sas_code": "",
     "table_issues": [],
     "adam_issues": [],
     "recipe_issues": [],
     "repair_stats": {},
     "eval_result": None,
+    "session_log": [],
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+
+def _log_event(event: str, status: str = "INFO", details: dict | None = None) -> None:
+    st.session_state.session_log.append(
+        {
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "event": event,
+            "status": status,
+            "details": details or {},
+        }
+    )
+
+
+def _session_log_text() -> str:
+    lines = []
+    for rec in st.session_state.session_log:
+        lines.append(
+            f"[{rec['ts_utc']}] {rec['status']} {rec['event']} :: {json.dumps(rec['details'], ensure_ascii=True)}"
+        )
+    return "\n".join(lines)
+
+
+if not st.session_state.session_log:
+    _log_event("session_started", "INFO", {"app": "TLF Compiler V2"})
 
 
 def render_issues(issues: list[ValidationIssue] | list[dict], title: str) -> None:
@@ -135,6 +162,27 @@ with st.sidebar:
     repair_retries = st.slider("Auto-repair retries", 0, 3, 2, 1)
     routing_mode = st.selectbox("Routing mode", ["heuristic", "llm", "consensus"], index=0)
     classifier_votes = st.slider("Consensus votes", 1, 7, 3, 2, disabled=(routing_mode != "consensus"))
+    st.markdown("---")
+    st.markdown("### Session Log")
+    st.caption("Download full in-app session events (parse, guardrails, recipe, eval).")
+    st.download_button(
+        "Download Log (JSON)",
+        data=json.dumps(st.session_state.session_log, indent=2),
+        file_name="session_log.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+    st.download_button(
+        "Download Log (TXT)",
+        data=_session_log_text(),
+        file_name="session_log.txt",
+        mime="text/plain",
+        use_container_width=True,
+    )
+    if st.button("Clear Session Log", use_container_width=True):
+        st.session_state.session_log = []
+        _log_event("session_log_cleared", "INFO")
+        st.rerun()
 
 
 col1, col2 = st.columns(2)
@@ -143,23 +191,36 @@ with col1:
     st.markdown("## Step 2 · Parse Shell")
     shell_file = st.file_uploader("Upload shell (PNG/JPG/PDF/DOCX)", type=["png", "jpg", "jpeg", "pdf", "docx"])
     if st.button("Run Shell Parse", use_container_width=True, type="primary"):
+        _log_event("shell_parse_requested", "INFO", {"has_file": bool(shell_file)})
         if not api_key:
             st.error("API key is required.")
+            _log_event("shell_parse_failed", "ERROR", {"reason": "missing_api_key"})
         elif not shell_file:
             st.error("Upload a shell file first.")
+            _log_event("shell_parse_failed", "ERROR", {"reason": "missing_file"})
         else:
             with st.spinner("Parsing shell..."):
                 ext = shell_file.name.rsplit(".", 1)[-1]
-                parsed = parse_shell(
-                    file_bytes=shell_file.read(),
-                    extension=ext,
-                    provider=provider,
-                    model=model,
-                    api_key=api_key,
-                    parse_temperature=parse_temperature,
-                )
-                st.session_state.table_json = parsed
-                st.session_state.table_issues = issue_dicts(validate_table_json(parsed))
+                try:
+                    parsed = parse_shell(
+                        file_bytes=shell_file.read(),
+                        extension=ext,
+                        provider=provider,
+                        model=model,
+                        api_key=api_key,
+                        parse_temperature=parse_temperature,
+                    )
+                    st.session_state.table_json = parsed
+                    issues = issue_dicts(validate_table_json(parsed))
+                    st.session_state.table_issues = issues
+                    _log_event(
+                        "shell_parse_completed",
+                        "SUCCESS",
+                        {"extension": ext, "issue_count": len(issues)},
+                    )
+                except Exception as e:
+                    st.error(f"Shell parse failed: {e}")
+                    _log_event("shell_parse_failed", "ERROR", {"extension": ext, "error": str(e)})
     if st.session_state.table_json:
         st.code(json.dumps(st.session_state.table_json, indent=2), language="json")
     render_issues(st.session_state.table_issues, "Shell issues")
@@ -168,23 +229,36 @@ with col2:
     st.markdown("## Step 3 · Parse AdaM Specs")
     adam_file = st.file_uploader("Upload AdaM spec (XLSX/PDF/DOCX)", type=["xlsx", "xls", "xlsm", "pdf", "docx"])
     if st.button("Run AdaM Parse", use_container_width=True, type="primary"):
+        _log_event("adam_parse_requested", "INFO", {"has_file": bool(adam_file)})
         if not api_key:
             st.error("API key is required.")
+            _log_event("adam_parse_failed", "ERROR", {"reason": "missing_api_key"})
         elif not adam_file:
             st.error("Upload an AdaM spec file first.")
+            _log_event("adam_parse_failed", "ERROR", {"reason": "missing_file"})
         else:
             with st.spinner("Parsing AdaM specs..."):
                 ext = adam_file.name.rsplit(".", 1)[-1]
-                parsed = parse_adam_specs(
-                    file_bytes=adam_file.read(),
-                    extension=ext,
-                    provider=provider,
-                    model=model,
-                    api_key=api_key,
-                    parse_temperature=adam_temperature,
-                )
-                st.session_state.adam_specs = parsed
-                st.session_state.adam_issues = issue_dicts(validate_adam_specs(parsed))
+                try:
+                    parsed = parse_adam_specs(
+                        file_bytes=adam_file.read(),
+                        extension=ext,
+                        provider=provider,
+                        model=model,
+                        api_key=api_key,
+                        parse_temperature=adam_temperature,
+                    )
+                    st.session_state.adam_specs = parsed
+                    issues = issue_dicts(validate_adam_specs(parsed))
+                    st.session_state.adam_issues = issues
+                    _log_event(
+                        "adam_parse_completed",
+                        "SUCCESS",
+                        {"extension": ext, "issue_count": len(issues)},
+                    )
+                except Exception as e:
+                    st.error(f"AdaM parse failed: {e}")
+                    _log_event("adam_parse_failed", "ERROR", {"extension": ext, "error": str(e)})
     if st.session_state.adam_specs:
         st.code(json.dumps(st.session_state.adam_specs, indent=2), language="json")
     render_issues(st.session_state.adam_issues, "AdaM issues")
@@ -198,8 +272,10 @@ with g2:
     st.caption("This validates shell/spec/recipe structures and can auto-repair JSON with constrained retries.")
 
 if run_guardrails:
+    _log_event("guardrails_requested", "INFO")
     if not api_key:
         st.error("API key is required for auto-repair.")
+        _log_event("guardrails_failed", "ERROR", {"reason": "missing_api_key"})
     else:
         stats = {}
         if st.session_state.table_json:
@@ -233,6 +309,7 @@ if run_guardrails:
             stats["adam_specs_retries"] = retries
         st.session_state.repair_stats = stats
         st.success("Guardrail pass complete.")
+        _log_event("guardrails_completed", "SUCCESS", stats)
 
 if st.session_state.repair_stats:
     st.json(st.session_state.repair_stats)
@@ -253,43 +330,61 @@ if st.session_state.table_json:
         f"Routing target: `{cls.table_type}` (confidence {cls.confidence:.2f}, source={cls.source}) · {cls.rationale}"
     )
 if st.button("Generate Recipe and R Code", type="primary", use_container_width=True):
+    _log_event("recipe_generation_requested", "INFO")
     if not api_key:
         st.error("API key is required.")
+        _log_event("recipe_generation_failed", "ERROR", {"reason": "missing_api_key"})
     elif not st.session_state.table_json:
         st.error("Parse shell first.")
+        _log_event("recipe_generation_failed", "ERROR", {"reason": "missing_table_json"})
     else:
         with st.spinner("Generating recipe..."):
-            recipe = generate_recipe(
-                table_json=st.session_state.table_json,
-                adam_specs=st.session_state.adam_specs,
-                provider=provider,
-                model=model,
-                api_key=api_key,
-                temperature=recipe_temperature,
-                routing_mode=routing_mode,
-                classifier_votes=classifier_votes,
-            )
-            fixed_recipe, recipe_issues, retries = validate_and_repair(
-                kind="recipe_json",
-                candidate=recipe,
-                validator=lambda r: validate_recipe(r, st.session_state.table_json, st.session_state.adam_specs),
-                context={
-                    "table_json": st.session_state.table_json,
-                    "adam_specs": st.session_state.adam_specs or {},
-                },
-                provider=provider,
-                model=model,
-                api_key=api_key,
-                max_retries=repair_retries,
-            )
-            st.session_state.recipe_json = fixed_recipe
-            st.session_state.recipe_issues = issue_dicts(recipe_issues)
-            st.session_state.repair_stats["recipe_retries"] = retries
-            if recipe_issues:
-                st.error("Recipe still has validation issues; R assembly blocked.")
-            else:
-                st.session_state.r_code = assemble_r_from_recipe(fixed_recipe)
-                st.success("Recipe validated and R code assembled.")
+            try:
+                recipe = generate_recipe(
+                    table_json=st.session_state.table_json,
+                    adam_specs=st.session_state.adam_specs,
+                    provider=provider,
+                    model=model,
+                    api_key=api_key,
+                    temperature=recipe_temperature,
+                    routing_mode=routing_mode,
+                    classifier_votes=classifier_votes,
+                )
+                fixed_recipe, recipe_issues, retries = validate_and_repair(
+                    kind="recipe_json",
+                    candidate=recipe,
+                    validator=lambda r: validate_recipe(r, st.session_state.table_json, st.session_state.adam_specs),
+                    context={
+                        "table_json": st.session_state.table_json,
+                        "adam_specs": st.session_state.adam_specs or {},
+                    },
+                    provider=provider,
+                    model=model,
+                    api_key=api_key,
+                    max_retries=repair_retries,
+                )
+                st.session_state.recipe_json = fixed_recipe
+                st.session_state.recipe_issues = issue_dicts(recipe_issues)
+                st.session_state.repair_stats["recipe_retries"] = retries
+                if recipe_issues:
+                    st.error("Recipe still has validation issues; R/SAS assembly blocked.")
+                    _log_event(
+                        "recipe_generation_completed",
+                        "WARNING",
+                        {"issue_count": len(recipe_issues), "repair_retries": retries},
+                    )
+                else:
+                    st.session_state.r_code = assemble_r_from_recipe(fixed_recipe)
+                    st.session_state.sas_code = assemble_sas_from_recipe(fixed_recipe)
+                    st.success("Recipe validated and R + SAS code assembled.")
+                    _log_event(
+                        "recipe_generation_completed",
+                        "SUCCESS",
+                        {"issue_count": 0, "repair_retries": retries},
+                    )
+            except Exception as e:
+                st.error(f"Recipe generation failed: {e}")
+                _log_event("recipe_generation_failed", "ERROR", {"error": str(e)})
 
 if st.session_state.recipe_json:
     st.markdown("### Recipe JSON")
@@ -299,6 +394,24 @@ render_issues(st.session_state.recipe_issues, "Recipe issues")
 if st.session_state.r_code:
     st.markdown("### Assembled R Code")
     st.code(st.session_state.r_code, language="r")
+    st.download_button(
+        "Download R Script",
+        data=st.session_state.r_code,
+        file_name="generated_table.R",
+        mime="text/plain",
+        use_container_width=True,
+    )
+
+if st.session_state.sas_code:
+    st.markdown("### Assembled SAS Program")
+    st.code(st.session_state.sas_code, language="sas")
+    st.download_button(
+        "Download SAS Program",
+        data=st.session_state.sas_code,
+        file_name="generated_table.sas",
+        mime="text/plain",
+        use_container_width=True,
+    )
 
 
 st.markdown("## Step 6 · Evaluation Harness")
@@ -313,23 +426,48 @@ with c4:
     st.caption(f"Cases path: `{EVAL_CASES_DIR}`")
 
 if run_eval_btn:
+    _log_event(
+        "eval_requested",
+        "INFO",
+        {
+            "run_llm_recipe": run_llm_recipe,
+            "benchmark_routing": benchmark_routing,
+            "routing_mode": routing_mode,
+            "classifier_votes": classifier_votes,
+        },
+    )
     if run_llm_recipe and not api_key:
         st.error("API key is required for LLM-backed eval.")
+        _log_event("eval_failed", "ERROR", {"reason": "missing_api_key_for_llm_eval"})
     else:
         with st.spinner("Running evaluation harness..."):
-            result = run_suite(
-                cases_dir=EVAL_CASES_DIR,
-                provider=provider,
-                model=model,
-                api_key=api_key,
-                recipe_temperature=recipe_temperature,
-                run_llm_recipe=run_llm_recipe,
-                repair_retries=repair_retries,
-                routing_mode=routing_mode,
-                classifier_votes=classifier_votes,
-                benchmark_routing=benchmark_routing,
-            )
-            st.session_state.eval_result = result
+            try:
+                result = run_suite(
+                    cases_dir=EVAL_CASES_DIR,
+                    provider=provider,
+                    model=model,
+                    api_key=api_key,
+                    recipe_temperature=recipe_temperature,
+                    run_llm_recipe=run_llm_recipe,
+                    repair_retries=repair_retries,
+                    routing_mode=routing_mode,
+                    classifier_votes=classifier_votes,
+                    benchmark_routing=benchmark_routing,
+                )
+                st.session_state.eval_result = result
+                _log_event(
+                    "eval_completed",
+                    "SUCCESS",
+                    {
+                        "total_cases": result.get("total_cases"),
+                        "passed_cases": result.get("passed_cases"),
+                        "pass_rate": result.get("pass_rate"),
+                        "routing_accuracy": result.get("routing_accuracy"),
+                    },
+                )
+            except Exception as e:
+                st.error(f"Eval failed: {e}")
+                _log_event("eval_failed", "ERROR", {"error": str(e)})
 
 if st.session_state.eval_result:
     result = st.session_state.eval_result

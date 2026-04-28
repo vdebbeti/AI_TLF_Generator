@@ -32,3 +32,9 @@ streamlit run app.py
   - AdaM parsing
   - recipe generation (kept lower by default)
 - Step numbering in UI matches execution order exactly (1 to 6).
+ - Session logging:
+  - captures end-to-end in-app events (parse, guardrails, recipe, eval)
+  - downloadable as JSON or TXT from the sidebar
+- SAS output:
+  - assembles a SAS program from the same validated recipe used for R code
+  - available in Step 5 with download button
