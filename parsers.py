@@ -1,7 +1,6 @@
 import io
 import json
 
-import docx
 import pdfplumber
 
 from llm_client import call_llm
@@ -40,6 +39,12 @@ def _extract_pdf_text(file_bytes: bytes) -> str:
 
 
 def _extract_docx_text(file_bytes: bytes) -> str:
+    try:
+        import docx
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "Missing dependency `python-docx`. Install it via requirements.txt."
+        ) from e
     d = docx.Document(io.BytesIO(file_bytes))
     lines: list[str] = []
     for para in d.paragraphs:
@@ -118,4 +123,3 @@ def parse_shell(
         raise ValueError(f"Unsupported shell extension: {extension}")
 
     return json.loads(_strip_fences(raw))
-
